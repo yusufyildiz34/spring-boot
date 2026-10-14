@@ -13,9 +13,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.util.Iterator;
@@ -500,6 +502,114 @@ class ZipContentTests {
 		try (ZipContent zip = ZipContent.open(file.toPath())) {
 			assertThat(zip.hasJarSignatureFile()).isTrue();
 		}
+	}
+
+	@Test
+	void openContentWhenCompressedSizeIsZip64ExtendedThrowsException() throws IOException {
+		File file = createZipFileWithCentralDirectoryValue(ZipFile.CENSIZ, 0xFFFFFFFF);
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			Entry entry = zip.getEntry("1.dat");
+			assertThatIOException().isThrownBy(entry::openContent)
+				.withMessage("Zip64 extended information extra fields are not supported");
+		}
+	}
+
+	@Test
+	void openContentWhenOffsetToLocalHeaderIsZip64ExtendedThrowsException() throws IOException {
+		File file = createZipFileWithCentralDirectoryValue(ZipFile.CENOFF, 0xFFFFFFFF);
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			Entry entry = zip.getEntry("1.dat");
+			assertThatIOException().isThrownBy(entry::openContent)
+				.withMessage("Zip64 extended information extra fields are not supported");
+		}
+	}
+
+	@Test
+	void getEntryWhenCentralDirectoryIsLargerThanMaxIntReturnsEntry() throws IOException {
+		Assumptions.assumeTrue(this.tempDir.getFreeSpace() > 3L * 1024 * 1024 * 1024, "Insufficient disk space");
+		File file = createZip64FileWithLargeCentralDirectory(Integer.MAX_VALUE);
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			int lastIndex = zip.size() - 1;
+			String lastName = largeCentralDirectoryEntryName(lastIndex);
+			assertThat(zip.getEntry(lastIndex).getName()).isEqualTo(lastName);
+			assertThat(zip.getEntry(lastName)).isNotNull();
+		}
+	}
+
+	@Test
+	void openWhenCentralDirectoryIsLargerThanMaxUnsignedIntThrowsException() throws IOException {
+		Assumptions.assumeTrue(this.tempDir.getFreeSpace() > 5L * 1024 * 1024 * 1024, "Insufficient disk space");
+		File file = createZip64FileWithLargeCentralDirectory(0xFFFFFFFFL);
+		assertThatIllegalStateException().isThrownBy(() -> ZipContent.open(file.toPath()))
+			.withMessage("Central directory too large in " + file.getAbsolutePath());
+	}
+
+	private File createZipFileWithCentralDirectoryValue(int offset, int value) throws IOException {
+		File file = createZipFile((zipOutput) -> writeEntry(zipOutput, new ZipEntry("1.dat"), (byte) 1));
+		ByteBuffer data = ByteBuffer.wrap(Files.readAllBytes(file.toPath()));
+		data.order(ByteOrder.LITTLE_ENDIAN);
+		int startOfCentralDirectoryOffset = data.getInt(data.capacity() - ZipFile.ENDHDR + ZipFile.ENDOFF);
+		data.putInt(startOfCentralDirectoryOffset + offset, value);
+		Files.write(file.toPath(), data.array());
+		return file;
+	}
+
+	/**
+	 * Create a sparse zip64 file with a central directory that is larger than the given
+	 * size. Each record has the maximum extra field and comment length so that the
+	 * required size can be reached with a small number of entries. The extra fields and
+	 * comments are never written and are left as sparse regions of the file.
+	 * @param minimumSizeOfCentralDirectory the size that the relative offset of the last
+	 * central directory record should exceed
+	 * @return the zip file
+	 * @throws IOException on I/O error
+	 */
+	private File createZip64FileWithLargeCentralDirectory(long minimumSizeOfCentralDirectory) throws IOException {
+		File file = new File(this.tempDir, "large-central-directory.zip");
+		short maximumLength = (short) 0xFFFF;
+		short nameLength = (short) largeCentralDirectoryEntryName(0).length();
+		ZipCentralDirectoryFileHeaderRecord record = new ZipCentralDirectoryFileHeaderRecord((short) 0, (short) 0,
+				(short) 0, (short) ZipEntry.STORED, (short) 0, (short) 0, 0, 0, 0, nameLength, maximumLength,
+				maximumLength, (short) 0, (short) 0, 0, 0);
+		long numberOfEntries = (minimumSizeOfCentralDirectory / record.size()) + 2;
+		long sizeOfCentralDirectory = numberOfEntries * record.size();
+		try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.CREATE_NEW,
+				StandardOpenOption.WRITE, StandardOpenOption.SPARSE)) {
+			for (int i = 0; i < numberOfEntries; i++) {
+				long pos = i * record.size();
+				byte[] name = largeCentralDirectoryEntryName(i).getBytes(StandardCharsets.UTF_8);
+				channel.write(ByteBuffer.wrap(record.asByteArray()), pos);
+				channel.write(ByteBuffer.wrap(name), pos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET);
+			}
+			ByteBuffer endRecords = ByteBuffer.allocate(56 + Zip64EndOfCentralDirectoryLocator.SIZE);
+			endRecords.order(ByteOrder.LITTLE_ENDIAN);
+			// Zip64 end of central directory record
+			endRecords.putInt(0x06064b50);
+			endRecords.putLong(44);
+			endRecords.putShort((short) 45);
+			endRecords.putShort((short) 45);
+			endRecords.putInt(0);
+			endRecords.putInt(0);
+			endRecords.putLong(numberOfEntries);
+			endRecords.putLong(numberOfEntries);
+			endRecords.putLong(sizeOfCentralDirectory);
+			endRecords.putLong(0);
+			// Zip64 end of central directory locator
+			endRecords.putInt(0x07064b50);
+			endRecords.putInt(0);
+			endRecords.putLong(sizeOfCentralDirectory);
+			endRecords.putInt(1);
+			endRecords.flip();
+			channel.write(endRecords, sizeOfCentralDirectory);
+			ZipEndOfCentralDirectoryRecord eocd = new ZipEndOfCentralDirectoryRecord((short) 0xFFFF, 0xFFFFFFFF,
+					0xFFFFFFFF);
+			channel.write(ByteBuffer.wrap(eocd.asByteArray()), sizeOfCentralDirectory + endRecords.capacity());
+		}
+		return file;
+	}
+
+	private static String largeCentralDirectoryEntryName(int index) {
+		return "%08d.dat".formatted(index);
 	}
 
 	private File createZipFile(ThrowingConsumer<ZipOutputStream> action) throws IOException {

@@ -10,7 +10,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.Cleaner.Cleanable;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
@@ -19,6 +22,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -54,6 +58,8 @@ import static org.mockito.Mockito.mock;
  */
 @AssertFileChannelDataBlocksClosed
 class NestedJarFileTests {
+
+	private static final long LARGER_THAN_MAX_INT = 3L * 1024 * 1024 * 1024;
 
 	@TempDir
 	File tempDir;
@@ -467,6 +473,72 @@ class NestedJarFileTests {
 				assertThat(input.available()).isZero();
 			}
 		}
+	}
+
+	@Test
+	void availableWhenStoredContentIsLargerThanMaxIntReturnsMaxInt() throws IOException {
+		File file = createJarWithLargeUncompressedSize(ZipEntry.STORED);
+		try (NestedJarFile jar = new NestedJarFile(file)) {
+			JarEntry entry = jar.getEntry("1.dat");
+			assertThat(entry.getSize()).isEqualTo(LARGER_THAN_MAX_INT);
+			try (InputStream input = jar.getInputStream(entry)) {
+				assertThat(input.available()).isEqualTo(Integer.MAX_VALUE);
+			}
+		}
+	}
+
+	@Test
+	void skipWhenStoredContentIsLargerThanMaxIntSkipsForward() throws IOException {
+		File file = createJarWithLargeUncompressedSize(ZipEntry.STORED);
+		try (NestedJarFile jar = new NestedJarFile(file)) {
+			JarEntry entry = jar.getEntry("1.dat");
+			try (InputStream input = jar.getInputStream(entry)) {
+				assertThat(input.skip(1)).isOne();
+			}
+		}
+	}
+
+	@Test
+	void availableWhenDeflatedContentIsLargerThanMaxIntReturnsMaxInt() throws IOException {
+		File file = createJarWithLargeUncompressedSize(ZipEntry.DEFLATED);
+		try (NestedJarFile jar = new NestedJarFile(file)) {
+			JarEntry entry = jar.getEntry("1.dat");
+			assertThat(entry.getSize()).isEqualTo(LARGER_THAN_MAX_INT);
+			try (InputStream input = jar.getInputStream(entry)) {
+				assertThat(input.available()).isEqualTo(Integer.MAX_VALUE);
+			}
+		}
+	}
+
+	/**
+	 * Create a jar with a single entry that has an uncompressed size in its central
+	 * directory record that is larger than {@link Integer#MAX_VALUE}.
+	 * @param method the compression method of the entry
+	 * @return the jar file
+	 * @throws IOException on I/O error
+	 */
+	private File createJarWithLargeUncompressedSize(int method) throws IOException {
+		File file = new File(this.tempDir, "large.jar");
+		try (JarOutputStream jarOutput = new JarOutputStream(new FileOutputStream(file))) {
+			JarEntry entry = new JarEntry("1.dat");
+			entry.setMethod(method);
+			if (method == ZipEntry.STORED) {
+				CRC32 crc = new CRC32();
+				crc.update(1);
+				entry.setSize(1);
+				entry.setCompressedSize(1);
+				entry.setCrc(crc.getValue());
+			}
+			jarOutput.putNextEntry(entry);
+			jarOutput.write(1);
+			jarOutput.closeEntry();
+		}
+		ByteBuffer data = ByteBuffer.wrap(Files.readAllBytes(file.toPath()));
+		data.order(ByteOrder.LITTLE_ENDIAN);
+		int startOfCentralDirectoryOffset = data.getInt(data.capacity() - ZipFile.ENDHDR + ZipFile.ENDOFF);
+		data.putInt(startOfCentralDirectoryOffset + ZipFile.CENLEN, (int) LARGER_THAN_MAX_INT);
+		Files.write(file.toPath(), data.array());
+		return file;
 	}
 
 	private List<String> collectComments(JarFile jarFile) throws IOException {

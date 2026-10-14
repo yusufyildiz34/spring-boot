@@ -681,7 +681,7 @@ public class NestedJarFile extends JarFile {
 	 */
 	private class JarEntryInputStream extends InputStream {
 
-		private final int uncompressedSize;
+		private final long uncompressedSize;
 
 		private final CloseableDataBlock content;
 
@@ -692,7 +692,7 @@ public class NestedJarFile extends JarFile {
 		private volatile boolean closed;
 
 		JarEntryInputStream(ZipContent.Entry entry) throws IOException {
-			this.uncompressedSize = entry.getUncompressedSize();
+			this.uncompressedSize = Integer.toUnsignedLong(entry.getUncompressedSize());
 			this.content = entry.openContent();
 			this.remaining = this.uncompressedSize;
 		}
@@ -760,7 +760,7 @@ public class NestedJarFile extends JarFile {
 			NestedJarFile.this.resources.removeInputStream(this);
 		}
 
-		int getUncompressedSize() {
+		long getUncompressedSize() {
 			return this.uncompressedSize;
 		}
 

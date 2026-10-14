@@ -273,7 +273,8 @@ public final class ZipContent implements Closeable {
 	}
 
 	private long getCentralDirectoryFileHeaderRecordPos(int lookupIndex) {
-		return this.centralDirectoryPos + this.relativeCentralDirectoryOffsetLookups[lookupIndex];
+		return this.centralDirectoryPos
+				+ Integer.toUnsignedLong(this.relativeCentralDirectoryOffsetLookups[lookupIndex]);
 	}
 
 	private boolean hasName(int lookupIndex, ZipCentralDirectoryFileHeaderRecord centralRecord, long pos,
@@ -462,12 +463,16 @@ public final class ZipContent implements Closeable {
 
 		private void add(ZipCentralDirectoryFileHeaderRecord centralRecord, long pos, boolean enableNameOffset)
 				throws IOException {
+			long relativeCentralDirectoryOffset = pos - this.centralDirectoryPos;
+			if (relativeCentralDirectoryOffset > 0xFFFFFFFFL) {
+				throw new IllegalStateException("Central directory too large in " + this.source);
+			}
 			int nameOffset = this.nameOffsetLookups.enable(this.cursor, enableNameOffset);
 			int hash = ZipString.hash(this.buffer, this.data,
 					pos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET + nameOffset,
 					Short.toUnsignedInt(centralRecord.fileNameLength()) - nameOffset, true);
 			this.nameHashLookups[this.cursor] = hash;
-			this.relativeCentralDirectoryOffsetLookups[this.cursor] = (int) ((pos - this.centralDirectoryPos));
+			this.relativeCentralDirectoryOffsetLookups[this.cursor] = (int) relativeCentralDirectoryOffset;
 			this.index[this.cursor] = this.cursor;
 			this.cursor++;
 		}
@@ -837,7 +842,7 @@ public final class ZipContent implements Closeable {
 		}
 
 		private void checkNotZip64Extended(long value) throws IOException {
-			if (value == 0xFFFFFFFF) {
+			if (value == 0xFFFFFFFFL) {
 				throw new IOException("Zip64 extended information extra fields are not supported");
 			}
 		}

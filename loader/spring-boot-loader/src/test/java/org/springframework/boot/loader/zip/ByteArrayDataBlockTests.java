@@ -9,6 +9,7 @@ import java.nio.ByteBuffer;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 /**
  * Tests for {@link ByteArrayDataBlock}.
@@ -63,6 +64,32 @@ class ByteArrayDataBlockTests {
 			int result = dataBlock.read(dst, 4);
 			assertThat(result).isEqualTo(3);
 			assertThat(dst.array()).containsExactly(4, 5, 6);
+		}
+	}
+
+	@Test
+	void readWhenPosIsAtEndReturnsMinusOne() throws Exception {
+		try (ByteArrayDataBlock dataBlock = new ByteArrayDataBlock(this.BYTES)) {
+			ByteBuffer dst = ByteBuffer.allocate(3);
+			assertThat(dataBlock.read(dst, this.BYTES.length)).isEqualTo(-1);
+		}
+	}
+
+	@Test
+	void readWhenPosIsGreaterThanMaxIntReturnsMinusOne() throws Exception {
+		try (ByteArrayDataBlock dataBlock = new ByteArrayDataBlock(this.BYTES)) {
+			ByteBuffer dst = ByteBuffer.allocate(3);
+			assertThat(dataBlock.read(dst, 0x100000004L)).isEqualTo(-1);
+			assertThat(dst.position()).isZero();
+		}
+	}
+
+	@Test
+	void readWhenPosIsNegativeThrowsException() throws Exception {
+		try (ByteArrayDataBlock dataBlock = new ByteArrayDataBlock(this.BYTES)) {
+			ByteBuffer dst = ByteBuffer.allocate(3);
+			assertThatIllegalArgumentException().isThrownBy(() -> dataBlock.read(dst, -1))
+				.withMessage("Position must not be negative");
 		}
 	}
 

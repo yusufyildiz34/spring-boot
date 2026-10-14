@@ -44,7 +44,8 @@ class VirtualZipDataBlock extends VirtualDataBlock implements CloseableDataBlock
 					Short.toUnsignedLong(centralRecord.fileNameLength()) - nameOffset);
 			long localRecordPos = Integer.toUnsignedLong(centralRecord.offsetToLocalHeader());
 			ZipLocalFileHeaderRecord localRecord = ZipLocalFileHeaderRecord.load(this.data, localRecordPos);
-			DataBlock content = new DataPart(localRecordPos + localRecord.size(), centralRecord.compressedSize());
+			DataBlock content = new DataPart(localRecordPos + localRecord.size(),
+					Integer.toUnsignedLong(centralRecord.compressedSize()));
 			boolean hasDescriptorRecord = ZipDataDescriptorRecord.isPresentBasedOnFlag(centralRecord);
 			ZipDataDescriptorRecord dataDescriptorRecord = (!hasDescriptorRecord) ? null
 					: ZipDataDescriptorRecord.load(data, localRecordPos + localRecord.size() + content.size());
@@ -118,14 +119,14 @@ class VirtualZipDataBlock extends VirtualDataBlock implements CloseableDataBlock
 
 		@Override
 		public int read(ByteBuffer dst, long pos) throws IOException {
-			int remaining = (int) (this.size - pos);
+			long remaining = this.size - pos;
 			if (remaining <= 0) {
 				return -1;
 			}
 			int originalLimit = -1;
 			if (dst.remaining() > remaining) {
 				originalLimit = dst.limit();
-				dst.limit(dst.position() + remaining);
+				dst.limit(dst.position() + (int) remaining);
 			}
 			int result = VirtualZipDataBlock.this.data.read(dst, this.offset + pos);
 			if (originalLimit != -1) {

@@ -7,12 +7,17 @@ package org.springframework.boot.loader.zip;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -121,6 +126,100 @@ class VirtualZipDataBlockTests {
 		}
 		byte[] virtualBytes = Files.readAllBytes(outputFile.toPath());
 		assertThat(bytes).isEqualTo(virtualBytes);
+	}
+
+	@Test
+	void createWhenContentIsLargerThanMaxIntContainsValidZipContent() throws IOException {
+		long contentSize = 3L * 1024 * 1024 * 1024;
+		byte[] name = "large.dat".getBytes(StandardCharsets.UTF_8);
+		ZipLocalFileHeaderRecord localRecord = new ZipLocalFileHeaderRecord((short) 10, (short) 0,
+				(short) ZipEntry.STORED, (short) 0, (short) 0, 0, (int) contentSize, (int) contentSize,
+				(short) name.length, (short) 0);
+		ZipCentralDirectoryFileHeaderRecord centralRecord = new ZipCentralDirectoryFileHeaderRecord((short) 10,
+				(short) 10, (short) 0, (short) ZipEntry.STORED, (short) 0, (short) 0, 0, (int) contentSize,
+				(int) contentSize, (short) name.length, (short) 0, (short) 0, (short) 0, (short) 0, 0, 0);
+		long centralRecordPos = localRecord.size() + contentSize;
+		SparseDataBlock data = new SparseDataBlock(centralRecordPos + centralRecord.size());
+		data.write(0, localRecord.asByteArray());
+		data.write(localRecord.size() - name.length, name);
+		data.write(centralRecordPos, centralRecord.asByteArray());
+		data.write(centralRecordPos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET, name);
+		try (VirtualZipDataBlock block = new VirtualZipDataBlock(data, NameOffsetLookups.NONE,
+				new ZipCentralDirectoryFileHeaderRecord[] { centralRecord }, new long[] { centralRecordPos })) {
+			ZipEndOfCentralDirectoryRecord eocd = new ZipEndOfCentralDirectoryRecord((short) 1, 0, 0);
+			assertThat(block.size()).isEqualTo(data.size() + eocd.size());
+			ByteBuffer content = ByteBuffer.allocate(16);
+			assertThat(block.read(content, localRecord.size())).isEqualTo(16);
+			ZipEndOfCentralDirectoryRecord virtualEocd = ZipEndOfCentralDirectoryRecord.load(block)
+				.endOfCentralDirectoryRecord();
+			assertThat(Integer.toUnsignedLong(virtualEocd.offsetToStartOfCentralDirectory()))
+				.isEqualTo(centralRecordPos);
+			assertThat(ZipCentralDirectoryFileHeaderRecord.load(block, centralRecordPos)).isEqualTo(centralRecord);
+			assertThat(ZipString.readString(block,
+					centralRecordPos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET, name.length))
+				.isEqualTo("large.dat");
+		}
+	}
+
+	@Test
+	void dataPartReadWhenSizeIsLargerThanMaxUnsignedIntReadsData() throws IOException {
+		SparseDataBlock data = new SparseDataBlock(0x100000000L + 32);
+		try (VirtualZipDataBlock block = new VirtualZipDataBlock(data, NameOffsetLookups.NONE,
+				new ZipCentralDirectoryFileHeaderRecord[0], new long[0])) {
+			DataBlock part = block.new DataPart(0, data.size());
+			assertThat(part.read(ByteBuffer.allocate(64), 0)).isEqualTo(64);
+			assertThat(part.read(ByteBuffer.allocate(64), data.size() - 8)).isEqualTo(8);
+			assertThat(part.read(ByteBuffer.allocate(64), data.size())).isEqualTo(-1);
+		}
+	}
+
+	/**
+	 * {@link CloseableDataBlock} that contains zeros apart from explicitly written bytes,
+	 * allowing large blocks to be tested without allocating their content.
+	 */
+	static class SparseDataBlock implements CloseableDataBlock {
+
+		private final long size;
+
+		private final NavigableMap<Long, byte[]> written = new TreeMap<>();
+
+		SparseDataBlock(long size) {
+			this.size = size;
+		}
+
+		void write(long pos, byte[] bytes) {
+			this.written.put(pos, bytes);
+		}
+
+		@Override
+		public long size() {
+			return this.size;
+		}
+
+		@Override
+		public int read(ByteBuffer dst, long pos) {
+			if (pos >= this.size) {
+				return -1;
+			}
+			int count = (int) Math.min(dst.remaining(), this.size - pos);
+			for (int i = 0; i < count; i++) {
+				dst.put(get(pos + i));
+			}
+			return count;
+		}
+
+		private byte get(long pos) {
+			Map.Entry<Long, byte[]> entry = this.written.floorEntry(pos);
+			if (entry != null && pos < entry.getKey() + entry.getValue().length) {
+				return entry.getValue()[(int) (pos - entry.getKey())];
+			}
+			return 0;
+		}
+
+		@Override
+		public void close() {
+		}
+
 	}
 
 }

@@ -46,7 +46,7 @@ class JarEntriesStream implements Closeable {
 		return this.entry;
 	}
 
-	boolean matches(boolean directory, int size, int compressionMethod, InputStreamSupplier streamSupplier)
+	boolean matches(boolean directory, long size, int compressionMethod, InputStreamSupplier streamSupplier)
 			throws IOException {
 		if (this.entry.isDirectory() != directory) {
 			fail("directory");
@@ -64,7 +64,7 @@ class JarEntriesStream implements Closeable {
 		return true;
 	}
 
-	private InputStream getInputStream(int size, InputStreamSupplier streamSupplier) throws IOException {
+	private InputStream getInputStream(long size, InputStreamSupplier streamSupplier) throws IOException {
 		InputStream inputStream = streamSupplier.get();
 		return (this.entry.getMethod() != ZipEntry.DEFLATED) ? inputStream
 				: new ZipInflaterInputStream(inputStream, this.inflater, size);

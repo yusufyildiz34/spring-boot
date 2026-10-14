@@ -19,11 +19,11 @@ import java.util.zip.InflaterInputStream;
  */
 class ZipInflaterInputStream extends InflaterInputStream {
 
-	private int available;
+	private long available;
 
 	private boolean extraBytesWritten;
 
-	ZipInflaterInputStream(InputStream inputStream, Inflater inflater, int size) {
+	ZipInflaterInputStream(InputStream inputStream, Inflater inflater, long size) {
 		super(inputStream, inflater, getInflaterBufferSize(size));
 		this.available = size;
 	}
@@ -37,7 +37,10 @@ class ZipInflaterInputStream extends InflaterInputStream {
 
 	@Override
 	public int available() throws IOException {
-		return (this.available >= 0) ? this.available : super.available();
+		if (this.available < 0) {
+			return super.available();
+		}
+		return (this.available < Integer.MAX_VALUE) ? (int) this.available : Integer.MAX_VALUE;
 	}
 
 	@Override

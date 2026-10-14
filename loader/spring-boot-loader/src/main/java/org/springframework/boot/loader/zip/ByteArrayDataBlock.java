@@ -38,6 +38,12 @@ class ByteArrayDataBlock implements CloseableDataBlock {
 
 	@Override
 	public int read(ByteBuffer dst, long pos) throws IOException {
+		if (pos < 0) {
+			throw new IllegalArgumentException("Position must not be negative");
+		}
+		if (pos >= this.bytes.length) {
+			return -1;
+		}
 		return read(dst, (int) pos);
 	}
 
