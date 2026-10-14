@@ -280,7 +280,7 @@ public final class ZipContent implements Closeable {
 			CharSequence namePrefix, CharSequence name) {
 		int offset = this.nameOffsetLookups.get(lookupIndex);
 		pos += ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET + offset;
-		int len = centralRecord.fileNameLength() - offset;
+		int len = Short.toUnsignedInt(centralRecord.fileNameLength()) - offset;
 		ByteBuffer buffer = ByteBuffer.allocate(ZipString.BUFFER_SIZE);
 		if (namePrefix != null) {
 			int startsWithNamePrefix = ZipString.startsWith(buffer, this.data, pos, len, namePrefix);
@@ -465,7 +465,7 @@ public final class ZipContent implements Closeable {
 			int nameOffset = this.nameOffsetLookups.enable(this.cursor, enableNameOffset);
 			int hash = ZipString.hash(this.buffer, this.data,
 					pos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET + nameOffset,
-					centralRecord.fileNameLength() - nameOffset, true);
+					Short.toUnsignedInt(centralRecord.fileNameLength()) - nameOffset, true);
 			this.nameHashLookups[this.cursor] = hash;
 			this.relativeCentralDirectoryOffsetLookups[this.cursor] = (int) ((pos - this.centralDirectoryPos));
 			this.index[this.cursor] = this.cursor;
@@ -550,7 +550,7 @@ public final class ZipContent implements Closeable {
 		}
 
 		private static ZipContent loadNestedZip(Source source, Entry entry) throws IOException {
-			if (entry.centralRecord.compressionMethod() != ZipEntry.STORED) {
+			if (entry.getCompressionMethod() != ZipEntry.STORED) {
 				throw new IOException("Nested entry '%s' in container zip '%s' must not be compressed"
 					.formatted(source.nestedEntryName(), source.path()));
 			}
@@ -596,7 +596,8 @@ public final class ZipContent implements Closeable {
 				pos += centralRecord.size();
 			}
 			long commentPos = locatedEocd.pos() + ZipEndOfCentralDirectoryRecord.COMMENT_OFFSET;
-			return loader.finish(kind, commentPos, eocd.commentLength(), signatureFiles.detected());
+			return loader.finish(kind, commentPos, Short.toUnsignedInt(eocd.commentLength()),
+					signatureFiles.detected());
 		}
 
 		/**
@@ -649,7 +650,7 @@ public final class ZipContent implements Closeable {
 						ZipCentralDirectoryFileHeaderRecord centralRecord = ZipCentralDirectoryFileHeaderRecord
 							.load(zip.data, pos);
 						long namePos = pos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET;
-						short nameLen = centralRecord.fileNameLength();
+						int nameLen = Short.toUnsignedInt(centralRecord.fileNameLength());
 						if (ZipString.startsWith(loader.buffer, zip.data, namePos, nameLen, directoryName) != -1) {
 							loader.add(centralRecord, pos, true);
 						}
@@ -688,10 +689,11 @@ public final class ZipContent implements Closeable {
 				ByteBuffer loadedBuffer) throws IOException {
 			if (!this.detected) {
 				long filenamePos = pos + ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET;
-				if (centralRecord.fileNameLength() > this.buffer.capacity() && ZipString.startsWith(loadedBuffer, data,
-						filenamePos, centralRecord.fileNameLength(), META_INF) >= 0) {
+				int filenameLength = Short.toUnsignedInt(centralRecord.fileNameLength());
+				if (filenameLength > this.buffer.capacity()
+						&& ZipString.startsWith(loadedBuffer, data, filenamePos, filenameLength, META_INF) >= 0) {
 					this.buffer.clear();
-					data.readFully(this.buffer, filenamePos + centralRecord.fileNameLength() - this.buffer.capacity());
+					data.readFully(this.buffer, filenamePos + filenameLength - this.buffer.capacity());
 					this.detected = bufferEndsWithSignatureSuffix();
 				}
 			}
@@ -766,8 +768,8 @@ public final class ZipContent implements Closeable {
 			}
 			long pos = getCentralDirectoryFileHeaderRecordPos(this.lookupIndex)
 					+ ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET;
-			return ZipString.startsWith(null, ZipContent.this.data, pos, this.centralRecord.fileNameLength(),
-					prefix) != -1;
+			return ZipString.startsWith(null, ZipContent.this.data, pos,
+					Short.toUnsignedInt(this.centralRecord.fileNameLength()), prefix) != -1;
 		}
 
 		/**
@@ -780,7 +782,8 @@ public final class ZipContent implements Closeable {
 				int offset = ZipContent.this.nameOffsetLookups.get(this.lookupIndex);
 				long pos = getCentralDirectoryFileHeaderRecordPos(this.lookupIndex)
 						+ ZipCentralDirectoryFileHeaderRecord.FILE_NAME_OFFSET + offset;
-				name = ZipString.readString(ZipContent.this.data, pos, this.centralRecord.fileNameLength() - offset);
+				name = ZipString.readString(ZipContent.this.data, pos,
+						Short.toUnsignedInt(this.centralRecord.fileNameLength()) - offset);
 				this.name = name;
 			}
 			return name;
@@ -793,7 +796,7 @@ public final class ZipContent implements Closeable {
 		 * @see ZipEntry#DEFLATED
 		 */
 		public int getCompressionMethod() {
-			return this.centralRecord.compressionMethod();
+			return Short.toUnsignedInt(this.centralRecord.compressionMethod());
 		}
 
 		/**

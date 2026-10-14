@@ -92,6 +92,14 @@ class ZipCentralDirectoryFileHeaderRecordTests {
 	}
 
 	@Test
+	void sizeWhenLengthsAreGreaterThanMaxShortReturnsSize() {
+		ZipCentralDirectoryFileHeaderRecord record = new ZipCentralDirectoryFileHeaderRecord((short) 1, (short) 2,
+				(short) 3, (short) 4, (short) 5, (short) 6, 7, 8, 9, (short) 0x8000, (short) 0x9000, (short) 0xFFFF,
+				(short) 13, (short) 14, 15, 16);
+		assertThat(record.size()).isEqualTo(135213L);
+	}
+
+	@Test
 	void copyToCopiesDataToZipEntry() throws Exception {
 		DataBlock dataBlock = new ByteArrayDataBlock(new byte[] { //
 				0x50, 0x4b, 0x01, 0x02, //

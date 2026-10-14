@@ -61,7 +61,7 @@ record ZipEndOfCentralDirectoryRecord(short numberOfThisDisk, short diskWhereCen
 	 * @return the record size
 	 */
 	long size() {
-		return MINIMUM_SIZE + this.commentLength;
+		return MINIMUM_SIZE + Short.toUnsignedInt(this.commentLength);
 	}
 
 	/**

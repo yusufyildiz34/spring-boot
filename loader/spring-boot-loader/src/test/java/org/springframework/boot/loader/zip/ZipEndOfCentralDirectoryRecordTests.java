@@ -95,4 +95,11 @@ class ZipEndOfCentralDirectoryRecordTests {
 		assertThat(record.size()).isEqualTo(29L);
 	}
 
+	@Test
+	void sizeWhenCommentLengthIsGreaterThanMaxShortReturnsSize() {
+		ZipEndOfCentralDirectoryRecord record = new ZipEndOfCentralDirectoryRecord((short) 1, (short) 2, (short) 3,
+				(short) 4, 5, 6, (short) 0xFFFF);
+		assertThat(record.size()).isEqualTo(65557L);
+	}
+
 }

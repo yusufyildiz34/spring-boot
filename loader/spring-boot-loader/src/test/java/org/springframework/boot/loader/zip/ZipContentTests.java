@@ -39,6 +39,7 @@ import org.springframework.boot.loader.zip.ZipContent.Entry;
 import org.springframework.boot.loader.zip.ZipContent.Kind;
 import org.springframework.util.FileCopyUtils;
 import org.springframework.util.StreamUtils;
+import org.springframework.util.function.ThrowingConsumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIOException;
@@ -54,6 +55,8 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
  * @author Madhura Bhave
  */
 class ZipContentTests {
+
+	private static final int LONGER_THAN_MAX_SHORT = Short.MAX_VALUE + 1000;
 
 	@TempDir
 	File tempDir;
@@ -403,6 +406,122 @@ class ZipContentTests {
 		try (ZipContent zip = ZipContent.open(file.toPath())) {
 			assertThat(zip.hasJarSignatureFile()).isTrue();
 		}
+	}
+
+	@Test
+	void getCommentWhenCommentIsLongerThanMaxShortReturnsComment() throws IOException {
+		String comment = "c".repeat(LONGER_THAN_MAX_SHORT);
+		File file = createZipFile((zipOutput) -> {
+			zipOutput.setComment(comment);
+			writeEntry(zipOutput, new ZipEntry("1.dat"), (byte) 1);
+		});
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			assertThat(zip.getComment()).isEqualTo(comment);
+			assertThat(zip.size()).isOne();
+			assertThat(zip.getEntry("1.dat")).isNotNull();
+		}
+	}
+
+	@Test
+	void getEntryWhenNameIsLongerThanMaxShortReturnsEntry() throws IOException {
+		String name = "n".repeat(LONGER_THAN_MAX_SHORT) + ".dat";
+		File file = createZipFile((zipOutput) -> {
+			writeEntry(zipOutput, new ZipEntry(name), (byte) 1);
+			writeEntry(zipOutput, new ZipEntry("2.dat"), (byte) 2);
+		});
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			assertThat(zip.size()).isEqualTo(2);
+			assertThat(zip.getEntry(0).getName()).isEqualTo(name);
+			assertThat(zip.getEntry(0).hasNameStartingWith("nnn")).isTrue();
+			assertThat(zip.getEntry(name)).isNotNull();
+			assertThat(zip.hasEntry(null, name)).isTrue();
+			assertThat(zip.getEntry("2.dat")).isNotNull();
+		}
+	}
+
+	@Test
+	void getEntryWhenEntryCommentIsLongerThanMaxShortReturnsEntry() throws IOException {
+		ZipEntry entry = new ZipEntry("1.dat");
+		entry.setComment("c".repeat(LONGER_THAN_MAX_SHORT));
+		File file = createZipFile((zipOutput) -> {
+			writeEntry(zipOutput, entry, (byte) 1);
+			writeEntry(zipOutput, new ZipEntry("2.dat"), (byte) 2);
+		});
+		try (ZipContent zip = ZipContent.open(file.toPath()); ZipFile zipFile = new ZipFile(file)) {
+			assertThat(zip.size()).isEqualTo(2);
+			assertThatFieldsAreEqual(zip.getEntry("1.dat").as(ZipEntry::new), zipFile.getEntry("1.dat"));
+			assertThat(zip.getEntry("2.dat")).isNotNull();
+		}
+	}
+
+	@Test
+	void openContentWhenExtraFieldIsLongerThanMaxShortReturnsContent() throws IOException {
+		ZipEntry entry = new ZipEntry("1.dat");
+		entry.setExtra(extraField(LONGER_THAN_MAX_SHORT));
+		File file = createZipFile((zipOutput) -> {
+			writeEntry(zipOutput, entry, (byte) 1);
+			writeEntry(zipOutput, new ZipEntry("2.dat"), (byte) 2);
+		});
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			assertThat(zip.size()).isEqualTo(2);
+			try (CloseableDataBlock content = zip.getEntry("1.dat").openContent()) {
+				assertThat(asInflaterInputStream(content)).hasBinaryContent(new byte[] { 1 });
+			}
+			try (CloseableDataBlock content = zip.getEntry("2.dat").openContent()) {
+				assertThat(asInflaterInputStream(content)).hasBinaryContent(new byte[] { 2 });
+			}
+		}
+	}
+
+	@Test
+	void nestedDirectoryWhenEntryNameIsLongerThanMaxShortReturnsNestedDirectory() throws IOException {
+		String name = "n".repeat(LONGER_THAN_MAX_SHORT) + ".dat";
+		File file = createZipFile((zipOutput) -> {
+			writeEntry(zipOutput, new ZipEntry("d/"));
+			writeEntry(zipOutput, new ZipEntry("d/" + name), (byte) 1);
+			writeEntry(zipOutput, new ZipEntry("2.dat"), (byte) 2);
+		});
+		try (ZipContent nested = ZipContent.open(file.toPath(), "d/")) {
+			assertThat(nested.size()).isOne();
+			assertThat(nested.getEntry(0).getName()).isEqualTo(name);
+			assertThat(nested.getEntry(name)).isNotNull();
+			File included = new File(this.tempDir, "included.zip");
+			write(included, nested.openRawZipData());
+			try (ZipFile loadedZipFile = new ZipFile(included)) {
+				assertThat(loadedZipFile.stream().map(ZipEntry::getName)).containsExactly(name);
+			}
+		}
+	}
+
+	@Test
+	void detectSignedWhenNameIsLongerThanMaxShort() throws IOException {
+		String name = "META-INF/" + "s".repeat(LONGER_THAN_MAX_SHORT) + ".RSA";
+		File file = createZipFile((zipOutput) -> writeEntry(zipOutput, new ZipEntry(name), (byte) 1));
+		try (ZipContent zip = ZipContent.open(file.toPath())) {
+			assertThat(zip.hasJarSignatureFile()).isTrue();
+		}
+	}
+
+	private File createZipFile(ThrowingConsumer<ZipOutputStream> action) throws IOException {
+		File file = new File(this.tempDir, "temp.zip");
+		try (ZipOutputStream zipOutput = new ZipOutputStream(new FileOutputStream(file))) {
+			action.accept(zipOutput);
+		}
+		return file;
+	}
+
+	private static void writeEntry(ZipOutputStream zipOutput, ZipEntry entry, byte... content) throws IOException {
+		zipOutput.putNextEntry(entry);
+		zipOutput.write(content);
+		zipOutput.closeEntry();
+	}
+
+	private static byte[] extraField(int length) {
+		ByteBuffer buffer = ByteBuffer.allocate(length);
+		buffer.order(ByteOrder.LITTLE_ENDIAN);
+		buffer.putShort((short) 0x6666);
+		buffer.putShort((short) (length - 4));
+		return buffer.array();
 	}
 
 	private File createZipFileWithEpochTimeOfZero() throws Exception {

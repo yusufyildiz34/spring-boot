@@ -60,7 +60,8 @@ record ZipCentralDirectoryFileHeaderRecord(short versionMadeBy, short versionNee
 	 * @return the record size
 	 */
 	long size() {
-		return MINIMUM_SIZE + fileNameLength() + extraFieldLength() + fileCommentLength();
+		return MINIMUM_SIZE + Short.toUnsignedInt(fileNameLength()) + Short.toUnsignedInt(extraFieldLength())
+				+ Short.toUnsignedInt(fileCommentLength());
 	}
 
 	/**

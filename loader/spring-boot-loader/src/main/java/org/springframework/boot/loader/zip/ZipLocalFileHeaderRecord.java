@@ -42,7 +42,7 @@ record ZipLocalFileHeaderRecord(short versionNeededToExtract, short generalPurpo
 	 * @return the record size
 	 */
 	long size() {
-		return MINIMUM_SIZE + fileNameLength() + extraFieldLength();
+		return MINIMUM_SIZE + Short.toUnsignedInt(fileNameLength()) + Short.toUnsignedInt(extraFieldLength());
 	}
 
 	/**

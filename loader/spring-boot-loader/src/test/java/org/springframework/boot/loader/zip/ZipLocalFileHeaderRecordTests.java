@@ -69,6 +69,13 @@ class ZipLocalFileHeaderRecordTests {
 	}
 
 	@Test
+	void sizeWhenLengthsAreGreaterThanMaxShortReturnsSize() {
+		ZipLocalFileHeaderRecord record = new ZipLocalFileHeaderRecord((short) 1, (short) 2, (short) 3, (short) 4,
+				(short) 5, 6, 7, 8, (short) 0x8000, (short) 0xFFFF);
+		assertThat(record.size()).isEqualTo(98333L);
+	}
+
+	@Test
 	void withExtraFieldLengthReturnsUpdatedInstance() {
 		ZipLocalFileHeaderRecord record = new ZipLocalFileHeaderRecord((short) 1, (short) 2, (short) 3, (short) 4,
 				(short) 5, 6, 7, 8, (short) 9, (short) 10)
